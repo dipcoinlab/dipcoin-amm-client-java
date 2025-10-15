@@ -13,9 +13,6 @@
 
 package io.dipcoin.sui.amm.constant;
 
-import io.dipcoin.sui.protocol.constant.SuiSystem;
-import io.dipcoin.sui.util.ObjectIdUtil;
-
 import java.math.BigInteger;
 
 /**
@@ -29,7 +26,7 @@ public interface SwapConstant {
 
     BigInteger DEFAULT_SLIPPAGE = new BigInteger("500");
 
-    String COIN_TYPE_SUI = ObjectIdUtil.normalizeSuiAddress(SuiSystem.SUI);
+    String COIN_TYPE_SUI = "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI";
 
     String SWAP_EXACT_X_TO_Y = "swap_exact_x_to_y";
 

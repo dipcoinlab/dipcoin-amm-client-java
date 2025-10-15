@@ -28,7 +28,6 @@ import io.dipcoin.sui.bcs.TypeTagSerializer;
 import io.dipcoin.sui.bcs.types.arg.call.CallArgObjectArg;
 import io.dipcoin.sui.bcs.types.arg.call.CallArgPure;
 import io.dipcoin.sui.bcs.types.arg.object.ObjectArgImmOrOwnedObject;
-import io.dipcoin.sui.bcs.types.gas.GasData;
 import io.dipcoin.sui.bcs.types.gas.SuiObjectRef;
 import io.dipcoin.sui.bcs.types.tag.TypeTag;
 import io.dipcoin.sui.bcs.types.transaction.Argument;
@@ -74,8 +73,6 @@ public class AmmClient {
 
     private final static String MODULE = "router";
 
-    private final static String BALANCE = "balance";
-
     private final static Map<String, CallArgObjectArg> AMM_SHARED = new ConcurrentHashMap<>();
 
     private final AmmConfig ammConfig;
@@ -111,12 +108,17 @@ public class AmmClient {
     /**
      * Split a specified amount of coins from the owner's balance
      * @param programmableTx
-     * @param coinList
      * @param type The coin type (format: packageId::module::struct)
      * @param amount The amount to split
      * @returns ProgrammableTransaction
      */
-    public int splitCoin(ProgrammableTransaction programmableTx, List<Coin> coinList, String type, BigInteger amount) {
+    public int splitCoin(ProgrammableTransaction programmableTx, String owner, String type, BigInteger amount) {
+        // Query available coins of specified type
+        List<Coin> coinList = QueryBuilder.getCoins(suiClient, owner, type);
+        if (coinList == null || coinList.isEmpty()) {
+            throw new AmmException("No " + type + " coins available");
+        }
+
         // Select and accumulate coins until target amount is reached
         AtomicReference<BigInteger> balanceOf = new AtomicReference<>(BigInteger.ZERO);
         List<Coin> selected = new ArrayList<>(coinList.size());
@@ -153,21 +155,27 @@ public class AmmClient {
                     objectId, version, digest))))), sources);
             programmableTx.addCommand(mergeCoins);
         }
+        programmableTx.addCommand(
+                CommandBuilder.splitCoins(
+                        Argument.ofInput(programmableTx.addInput(new CallArgObjectArg(new ObjectArgImmOrOwnedObject(new SuiObjectRef(
+                                objectId, version, digest))))),
+                        List.of(Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(amount.longValue(), PureBcs.BasePureType.U64))))));
+        return programmableTx.getCommandsSize() - 1;
+    }
 
-        if (type.equals(SwapConstant.COIN_TYPE_SUI)) {
-            programmableTx.addCommand(
-                    CommandBuilder.splitCoins(
-                            List.of(Argument.ofInput(programmableTx.addInput(
-                                    new CallArgPure(amount.longValue(), PureBcs.BasePureType.U64))))));
-        } else {
-            programmableTx.addCommand(
-                    CommandBuilder.splitCoins(
-                            Argument.ofInput(programmableTx.addInput(new CallArgObjectArg(new ObjectArgImmOrOwnedObject(new SuiObjectRef(
-                                    objectId, version, digest))))),
-                            List.of(Argument.ofInput(programmableTx.addInput(
-                                    new CallArgPure(amount.longValue(), PureBcs.BasePureType.U64))))));
-        }
-        return programmableTx.getCommands().size() - 1;
+    /**
+     * Split a specified amount of coins from the owner's balance
+     * @param programmableTx
+     * @param amount The amount to split
+     * @returns ProgrammableTransaction
+     */
+    public int splitSui(ProgrammableTransaction programmableTx, BigInteger amount) {
+        programmableTx.addCommand(
+                CommandBuilder.splitCoins(
+                        List.of(Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(amount.longValue(), PureBcs.BasePureType.U64))))));
+        return programmableTx.getCommandsSize() - 1;
     }
 
     /**
@@ -196,9 +204,7 @@ public class AmmClient {
         // Sort token types and determine swap direction
         String typeX = params.getTypeX();
         String[] orderType = PackageUtil.orderType(typeX, params.getTypeY());
-        params.setTypeX(orderType[0]);
-        params.setTypeY(orderType[1]);
-        boolean isSwap = orderType[0].equals(params.getTypeY());
+        boolean isSwap = !orderType[0].equals(params.getTypeX());
         BigInteger balanceX = isSwap ? pool.getBalY() : pool.getBalX();
         BigInteger balanceY = isSwap ? pool.getBalX() : pool.getBalY();
         BigInteger amountIn = MathUtil.getAmountIn(pool.getFeeRate(), params.getAmountOut(), balanceX, balanceY);
@@ -207,15 +213,13 @@ public class AmmClient {
         String functionName = isSwap ? SwapConstant.SWAP_Y_TO_EXACT_X : SwapConstant.SWAP_X_TO_EXACT_Y;
 
         ProgrammableTransaction programmableTx = new ProgrammableTransaction();
-        // Query available coins of specified type
-        List<Coin> coinList = QueryBuilder.getCoins(suiClient, address, typeX);
-        if (coinList == null || coinList.isEmpty()) {
-            throw new AmmException("No " + typeX + " coins available");
-        }
 
-        Coin first = coinList.getFirst();
-        coinList.removeFirst();
-        int splitIndex = this.splitCoin(programmableTx, coinList, typeX, amountInMax);
+        int splitIndex = 0;
+        if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
+            splitIndex = this.splitSui(programmableTx, amountInMax);
+        } else {
+            splitIndex = this.splitCoin(programmableTx, address, typeX, amountInMax);
+        }
 
         // Type tags
         List<TypeTag> typeTags = new ArrayList<>(2);
@@ -243,7 +247,7 @@ public class AmmClient {
         ));
         programmableTx.addCommands(commands);
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, this.getGasData(first, address, gasPrice, gasBudget));
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
         } catch (IOException e) {
             throw new AmmException(e.getMessage());
         }
@@ -338,22 +342,6 @@ public class AmmClient {
         CallArgObjectArg sharedObject = TransactionBuilder.buildSharedObject(suiClient, objectId, mutable);
         AMM_SHARED.put(objectId, sharedObject);
         return sharedObject;
-    }
-
-    /**
-     * get gas data
-     * @param coin
-     * @param address
-     * @param gasPrice
-     * @param gasBudget
-     * @return
-     */
-    private GasData getGasData(Coin coin, String address, long gasPrice, BigInteger gasBudget) {
-        return TransactionBuilder.buildGasData(
-                new SuiObjectRef(coin.getCoinObjectId(), coin.getVersion(), coin.getDigest()),
-                address,
-                gasPrice,
-                gasBudget);
     }
 
 }
