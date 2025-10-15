@@ -27,7 +27,7 @@ import java.math.BigInteger;
 public class SwapParams {
 
     /** Pool ID to perform swap in */
-    private String pooId;
+    private String poolId;
 
     /** Token X type in package::module::struct format */
     private String typeX;

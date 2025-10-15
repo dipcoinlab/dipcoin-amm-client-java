@@ -89,20 +89,187 @@ public class AmmClient {
         this.suiClient = suiClient;
     }
 
+    // ------------------------- build API -------------------------
+
+    /**
+     * Build add liquidity transaction
+     * @param params Parameters for adding liquidity
+     * @param address The address of the wallet
+     * @returns {Promise<TxResponse>} Transaction response containing status and txId
+     */
+    public ProgrammableTransaction buildAddLiquidity(AddLiquidityParams params, String address) {
+        // Validate input parameters
+        MathUtil.validateAmount(params.getAmountX());
+        MathUtil.validateAmount(params.getAmountY());
+        BigInteger slippage = params.getSlippage();
+        MathUtil.validateSlippage(slippage);
+
+        // Fetch current pool and global state
+        String poolId = params.getPoolId();
+        Pool pool = this.getPool(suiClient, poolId);
+
+        // Sort token types and determine swap direction
+        String[] orderType = PackageUtil.orderType(params.getTypeX(), params.getTypeY());
+        String typeX = orderType[0];
+        String typeY = orderType[1];
+        boolean isSwap = !typeX.equals(params.getTypeX());
+        BigInteger amountX = isSwap ? params.getAmountY() : params.getAmountX();
+        BigInteger amountY = isSwap ? params.getAmountX() : params.getAmountY();
+        BigInteger balX = pool.getBalX();
+        BigInteger balY = pool.getBalY();
+
+        BigInteger[] calcOptimalCoinValues = MathUtil.calcOptimalCoinValues(amountX, amountY, balX, balY);
+        BigInteger coinXDesired = calcOptimalCoinValues[0];
+        BigInteger coinYDesired = calcOptimalCoinValues[1];
+        BigInteger expectedLp = MathUtil.getExpectedLiquidityAmount(coinXDesired, coinYDesired, balX, balY, pool.getLpSupply());
+
+        BigInteger minAddLiquidityLpAmount = pool.getMinAddLiquidityLpAmount();
+        if (expectedLp.compareTo(minAddLiquidityLpAmount) < 0) {
+            throw new AmmException("add liquidity too little, expectedLp: " + expectedLp + " is less than min_add_liquidity_lp_amount: " + minAddLiquidityLpAmount);
+        }
+
+        BigInteger coinXMin = MathUtil.getSlippageAmount(coinXDesired, slippage);
+        BigInteger coinYMin = MathUtil.getSlippageAmount(coinYDesired, slippage);
+
+        // Build transaction to split coins and add liquidity
+        ProgrammableTransaction programmableTx = new ProgrammableTransaction();
+
+        int splitIndexX = 0;
+        if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
+            splitIndexX = this.splitSui(programmableTx, amountX);
+        } else {
+            splitIndexX = this.splitCoin(programmableTx, address, typeX, amountX);
+        }
+        int splitIndexY = 0;
+        if (typeY.equals(SwapConstant.COIN_TYPE_SUI)) {
+            splitIndexY = this.splitSui(programmableTx, amountY);
+        } else {
+            splitIndexY = this.splitCoin(programmableTx, address, typeY, amountY);
+        }
+
+        // Type tags
+        List<TypeTag> typeTags = new ArrayList<>(2);
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[0], true));
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[1], true));
+
+        ProgrammableMoveCall moveCall = new ProgrammableMoveCall(
+                ammConfig.packageId(),
+                MODULE,
+                SwapConstant.ADD_LIQUIDITY,
+                typeTags,
+                Arrays.asList(
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(this.ammConfig.globalId(), false))),
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(poolId, true))),
+                        new Argument.NestedResult(splitIndexX, 0),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(coinXMin.longValue(), PureBcs.BasePureType.U64))),
+                        new Argument.NestedResult(splitIndexY, 0),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(coinYMin.longValue(), PureBcs.BasePureType.U64)))
+                )
+        );
+
+        // Command
+        Command depositMoveCallCommand = new Command.MoveCall(moveCall);
+        List<Command> commands = new ArrayList<>(List.of(
+                depositMoveCallCommand
+        ));
+        programmableTx.addCommands(commands);
+        return programmableTx;
+    }
+
+    /**
+     * Build swap X to exact Y transaction
+     * @param params Swap parameters including amountOut and optional slippage
+     * @param address The address of the wallet
+     * @returns ProgrammableTransaction object
+     */
+    public ProgrammableTransaction buildSwapXToExactY(SwapParams params, String address) {
+        // Validate input parameters
+        MathUtil.validateAmount(params.getAmountOut());
+        BigInteger slippage = params.getSlippage();
+        MathUtil.validateSlippage(slippage);
+
+        // Fetch current pool and global state
+        String poolId = params.getPoolId();
+        Pool pool = this.getPool(suiClient, params.getPoolId());
+
+        // Sort token types and determine swap direction
+        String typeX = params.getTypeX();
+        String[] orderType = PackageUtil.orderType(typeX, params.getTypeY());
+        boolean isSwap = !orderType[0].equals(params.getTypeX());
+        BigInteger balanceX = isSwap ? pool.getBalY() : pool.getBalX();
+        BigInteger balanceY = isSwap ? pool.getBalX() : pool.getBalY();
+        BigInteger amountIn = MathUtil.getAmountIn(pool.getFeeRate(), params.getAmountOut(), balanceX, balanceY);
+
+        BigInteger amountInMax = amountIn.multiply(SwapConstant.SLIPPAGE_SCALE).divide(SwapConstant.SLIPPAGE_SCALE.subtract(slippage));
+        String functionName = isSwap ? SwapConstant.SWAP_Y_TO_EXACT_X : SwapConstant.SWAP_X_TO_EXACT_Y;
+
+        ProgrammableTransaction programmableTx = new ProgrammableTransaction();
+
+        int splitIndex = 0;
+        if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
+            splitIndex = this.splitSui(programmableTx, amountInMax);
+        } else {
+            splitIndex = this.splitCoin(programmableTx, address, typeX, amountInMax);
+        }
+
+        // Type tags
+        List<TypeTag> typeTags = new ArrayList<>(2);
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[0], true));
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[1], true));
+
+        ProgrammableMoveCall moveCall = new ProgrammableMoveCall(
+                ammConfig.packageId(),
+                MODULE,
+                functionName,
+                typeTags,
+                Arrays.asList(
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(this.ammConfig.globalId(), false))),
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(poolId, true))),
+                        new Argument.NestedResult(splitIndex, 0),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(params.getAmountOut().longValue(), PureBcs.BasePureType.U64)))
+                )
+        );
+
+        // Command
+        Command depositMoveCallCommand = new Command.MoveCall(moveCall);
+        List<Command> commands = new ArrayList<>(List.of(
+                depositMoveCallCommand
+        ));
+        programmableTx.addCommands(commands);
+        return programmableTx;
+    }
+
     // ------------------------- write API -------------------------
 
-    public SuiTransactionBlockResponse addLiquidity(String sender, AddLiquidityParams params) {
-        // Validate input parameters
-        if (params.getAmountX().compareTo(BigInteger.ZERO) <= 0 || params.getAmountY().compareTo(BigInteger.ZERO) <= 0) {
-            throw new AmmException("Amount must be greater than 0");
+    public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+        ProgrammableTransaction programmableTx = buildAddLiquidity(params, address);
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
         }
-        if (params.getSlippage().compareTo(BigInteger.ONE) >= 0) {
-            throw new AmmException("Slippage must be less than 100%");
-        }
-        // Sort token types lexicographically to ensure consistent ordering
-        String[] orderType = PackageUtil.orderType(params.getTypeX(), params.getTypeY());
+    }
 
-        return null;
+    /**
+     * Swap token X for an exact amount of token Y
+     * @param params Swap parameters including amountOut and optional slippage
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns {Promise<TxResponse>} Transaction response containing status and txId
+     */
+    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+        ProgrammableTransaction programmableTx = buildSwapXToExactY(params, address);
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
+        }
     }
 
     /**
@@ -176,81 +343,6 @@ public class AmmClient {
                         List.of(Argument.ofInput(programmableTx.addInput(
                                 new CallArgPure(amount.longValue(), PureBcs.BasePureType.U64))))));
         return programmableTx.getCommandsSize() - 1;
-    }
-
-    /**
-     * Swap token X for an exact amount of token Y
-     * @param params Swap parameters including amountOut and optional slippage
-     * @param suiKeyPair The keypair for signing the transaction
-     * @param gasPrice gas price
-     * @param gasBudget gas limit
-     * @returns {Promise<TxResponse>} Transaction response containing status and txId
-     */
-    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        // Validate input parameters
-        if (params.getAmountOut() == null || params.getAmountOut().compareTo(BigInteger.ZERO) <= 0) {
-            throw new AmmException("Amount must be greater than 0");
-        }
-        BigInteger slippage = params.getSlippage();
-        if (slippage.compareTo(SwapConstant.SLIPPAGE_SCALE) >= 0) {
-            throw new Error("Slippage must be less than 100%");
-        }
-
-        // Fetch current pool and global state
-        String pooId = params.getPooId();
-        Pool pool = this.getPool(suiClient, params.getPooId());
-        String address = suiKeyPair.address();
-
-        // Sort token types and determine swap direction
-        String typeX = params.getTypeX();
-        String[] orderType = PackageUtil.orderType(typeX, params.getTypeY());
-        boolean isSwap = !orderType[0].equals(params.getTypeX());
-        BigInteger balanceX = isSwap ? pool.getBalY() : pool.getBalX();
-        BigInteger balanceY = isSwap ? pool.getBalX() : pool.getBalY();
-        BigInteger amountIn = MathUtil.getAmountIn(pool.getFeeRate(), params.getAmountOut(), balanceX, balanceY);
-
-        BigInteger amountInMax = amountIn.multiply(SwapConstant.SLIPPAGE_SCALE).divide(SwapConstant.SLIPPAGE_SCALE.subtract(slippage));
-        String functionName = isSwap ? SwapConstant.SWAP_Y_TO_EXACT_X : SwapConstant.SWAP_X_TO_EXACT_Y;
-
-        ProgrammableTransaction programmableTx = new ProgrammableTransaction();
-
-        int splitIndex = 0;
-        if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
-            splitIndex = this.splitSui(programmableTx, amountInMax);
-        } else {
-            splitIndex = this.splitCoin(programmableTx, address, typeX, amountInMax);
-        }
-
-        // Type tags
-        List<TypeTag> typeTags = new ArrayList<>(2);
-        typeTags.add(TypeTagSerializer.parseFromStr(orderType[0], true));
-        typeTags.add(TypeTagSerializer.parseFromStr(orderType[1], true));
-
-        ProgrammableMoveCall moveCall = new ProgrammableMoveCall(
-                ammConfig.packageId(),
-                MODULE,
-                functionName,
-                typeTags,
-                Arrays.asList(
-                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(this.ammConfig.globalId(), false))),
-                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(pooId, true))),
-                        new Argument.NestedResult(splitIndex, 0),
-                        Argument.ofInput(programmableTx.addInput(
-                                new CallArgPure(params.getAmountOut().longValue(), PureBcs.BasePureType.U64)))
-                )
-        );
-
-        // Command
-        Command depositMoveCallCommand = new Command.MoveCall(moveCall);
-        List<Command> commands = new ArrayList<>(List.of(
-                depositMoveCallCommand
-        ));
-        programmableTx.addCommands(commands);
-        try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
-        } catch (IOException e) {
-            throw new AmmException(e.getMessage());
-        }
     }
 
     // ------------------------- read API -------------------------

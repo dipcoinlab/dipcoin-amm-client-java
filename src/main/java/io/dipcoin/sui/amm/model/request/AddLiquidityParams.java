@@ -27,7 +27,7 @@ import java.math.BigInteger;
 public class AddLiquidityParams {
 
     /** Pool ID to add liquidity to (e.g. 0x1234...abcdef) */
-    private String pooId;
+    private String poolId;
 
     /** Token X type in package::module::struct format (e.g. 0xdba...::usdc::USDC) */
     private String typeX;

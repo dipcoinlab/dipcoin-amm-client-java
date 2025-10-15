@@ -13,6 +13,7 @@
 
 package io.dipcoin.sui.amm.utils;
 
+import io.dipcoin.sui.amm.constant.SwapConstant;
 import io.dipcoin.sui.amm.exception.AmmException;
 
 import java.math.BigInteger;
@@ -27,6 +28,7 @@ public class MathUtil {
     private final static BigInteger MAX_FEE_RATE = new BigInteger("2000"); // Maximum transaction fee rate 20%
     private final static BigInteger FEE_SCALE = new BigInteger("10000");
     private final static BigInteger U64_MAX = new BigInteger("18446744073709551615");
+    private final static BigInteger THOUSAND = new BigInteger("1000");
 
     /**
      * Calculate required input amount for desired output amount
@@ -61,5 +63,140 @@ public class MathUtil {
             throw new AmmException("U64 overflow");
         }
         return amountIn;
+    }
+
+    /**
+     *
+     * @param coinXDesired
+     * @param coinYDesired
+     * @param coinXReserve
+     * @param coinYReserve
+     * @return
+     */
+    public static BigInteger[] calcOptimalCoinValues(BigInteger coinXDesired, BigInteger coinYDesired, BigInteger coinXReserve, BigInteger coinYReserve) {
+        if (coinXReserve.compareTo(BigInteger.ZERO) == 0 && coinYReserve.compareTo(BigInteger.ZERO) == 0) {
+            return new BigInteger[]{ coinXDesired, coinYDesired };
+        }
+
+        BigInteger coinYReturned = mulDiv(coinXDesired, coinYDesired, coinXReserve);
+        if (coinYReturned.compareTo(coinYDesired) <= 0) {
+            return new BigInteger[]{ coinXDesired, coinYReturned };
+        } else {
+            BigInteger coinXReturned = mulDiv(coinYDesired, coinXDesired, coinYReserve);
+            if  (coinXReturned.compareTo(coinXDesired) >= 0) {
+                throw new AmmException("Over limit");
+            }
+            return new BigInteger[]{ coinXReturned, coinYDesired };
+        }
+
+    }
+    
+    /**
+     * Calculate LP token amount to mint for provided liquidity
+     * @param optimalCoinX Optimal amount of token X being added
+     * @param optimalCoinY Optimal amount of token Y being added
+     * @param coinXReserve Current reserve of token X in pool
+     * @param coinYReserve Current reserve of token Y in pool
+     * @param lpSupply Current total supply of LP tokens
+     * @returns Amount of LP tokens to mint
+     */
+    public static BigInteger getExpectedLiquidityAmount(BigInteger optimalCoinX,
+                                                        BigInteger optimalCoinY,
+                                                        BigInteger coinXReserve,
+                                                        BigInteger coinYReserve,
+                                                        BigInteger lpSupply) {
+        // First time adding liquidity - use geometric mean
+        if (coinXReserve.compareTo(BigInteger.ZERO) == 0 && coinYReserve.compareTo(BigInteger.ZERO) == 0 && lpSupply.compareTo(BigInteger.ZERO) == 0) {
+        BigInteger liquidityAmount = optimalCoinX
+                    .multiply(optimalCoinY)
+                    .sqrt()
+                    .subtract(THOUSAND);
+
+            validateOverflow(liquidityAmount);
+            return liquidityAmount;
+        }
+
+        // Calculate proportional LP tokens based on contribution ratio
+        BigInteger xLiq = lpSupply
+                .multiply(optimalCoinX)
+                .divide(coinXReserve);
+        BigInteger yLiq = lpSupply
+                .multiply(optimalCoinY)
+                .divide(coinYReserve);
+
+        // Return the smaller value to maintain ratio
+        if (xLiq.compareTo(yLiq) < 0) {
+            validateOverflow(xLiq);
+            return xLiq;
+        } else {
+            validateOverflow(yLiq);
+            return yLiq;
+        }
+    }
+
+    /**
+     * Performs multiplication then division: (x * y) / z
+     * @param x First number to multiply
+     * @param y Second number to multiply
+     * @param z Number to divide by
+     * @returns Result of (x * y) / z
+     * @throws AmmException division by zero or U64 overflow
+     */
+    public static BigInteger mulDiv(BigInteger x, BigInteger y, BigInteger z) {
+        validateZero(z);
+        BigInteger result = x.multiply(y).divide(z);
+        validateOverflow(result);
+        return result;
+    }
+
+    /**
+     * get the calculated amount after applying slippage
+     * @param amount
+     * @param slippage
+     * @returns Result of( amount * (10000 - slippage) / 10000)
+     * @throws AmmException division by zero or U64 overflow
+     */
+    public static BigInteger getSlippageAmount(BigInteger amount, BigInteger slippage) {
+        return amount.multiply(SwapConstant.SLIPPAGE_SCALE.subtract(slippage)).divide(SwapConstant.SLIPPAGE_SCALE);
+    }
+
+    /**
+     * validate overflow amount
+     * @param amount
+     */
+    public static void validateOverflow(BigInteger amount) {
+        if (amount.compareTo(U64_MAX) > 0) {
+            throw new AmmException("U64 overflow");
+        }
+    }
+
+    /**
+     * validate zero amount
+     * @param amount
+     */
+    public static void validateZero(BigInteger amount) {
+        if (amount == null || amount.compareTo(BigInteger.ZERO) == 0) {
+            throw new AmmException("Division by zero");
+        }
+    }
+
+    /**
+     * validate amount
+     * @param amount
+     */
+    public static void validateAmount(BigInteger amount) {
+        if (amount == null || amount.compareTo(BigInteger.ZERO) <= 0) {
+            throw new AmmException("Amount must be greater than 0");
+        }
+    }
+
+    /**
+     * validate slippage
+     * @param slippage
+     */
+    public static void validateSlippage(BigInteger slippage) {
+        if (slippage == null || slippage.compareTo(SwapConstant.SLIPPAGE_SCALE) >= 0) {
+            throw new AmmException("Slippage must be less than 100%");
+        }
     }
 }
