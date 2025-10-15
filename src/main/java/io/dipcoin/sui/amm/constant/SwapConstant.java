@@ -30,6 +30,8 @@ public interface SwapConstant {
 
     String ADD_LIQUIDITY = "add_liquidity";
 
+    String REMOVE_LIQUIDITY = "remove_liquidity";
+
     String SWAP_EXACT_X_TO_Y = "swap_exact_x_to_y";
 
     String SWAP_EXACT_Y_TO_X = "swap_exact_y_to_x";

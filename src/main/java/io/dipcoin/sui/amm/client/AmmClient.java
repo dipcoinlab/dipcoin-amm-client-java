@@ -18,6 +18,7 @@ import io.dipcoin.sui.amm.constant.SwapConstant;
 import io.dipcoin.sui.amm.exception.AmmException;
 import io.dipcoin.sui.amm.model.AmmConfig;
 import io.dipcoin.sui.amm.model.request.AddLiquidityParams;
+import io.dipcoin.sui.amm.model.request.RemoveLiquidityParams;
 import io.dipcoin.sui.amm.model.request.SwapParams;
 import io.dipcoin.sui.amm.model.response.Global;
 import io.dipcoin.sui.amm.model.response.Pool;
@@ -95,7 +96,7 @@ public class AmmClient {
      * Build add liquidity transaction
      * @param params Parameters for adding liquidity
      * @param address The address of the wallet
-     * @returns {Promise<TxResponse>} Transaction response containing status and txId
+     * @returns ProgrammableTransaction
      */
     public ProgrammableTransaction buildAddLiquidity(AddLiquidityParams params, String address) {
         // Validate input parameters
@@ -179,10 +180,81 @@ public class AmmClient {
     }
 
     /**
+     * Build remove liquidity transaction
+     * @param params Parameters for removing liquidity
+     * @param address The address of the wallet
+     * @returns ProgrammableTransaction
+     */
+    public ProgrammableTransaction buildRemoveLiquidity(RemoveLiquidityParams params, String address) {
+        // Validate input parameters
+        BigInteger removeLpAmount = params.getRemoveLpAmount();
+        MathUtil.validateAmount(removeLpAmount);
+        BigInteger slippage = params.getSlippage();
+        // Calculate minimum acceptable amounts with slippage protection
+        MathUtil.validateSlippage(slippage);
+
+        // Get LP token type based on sorted token types
+        String[] lpType = PackageUtil.getLpType(this.ammConfig.packageId(), params.getTypeX(), params.getTypeY());
+        String typeX = lpType[0];
+        String typeY = lpType[1];
+
+        // Fetch current pool and global state
+        String poolId = params.getPoolId();
+        Pool pool = this.getPool(suiClient, poolId);
+
+        BigInteger minRemoveLiquidityLpAmount = pool.getMinAddLiquidityLpAmount().divide(BigInteger.TEN);
+        if (removeLpAmount.compareTo(minRemoveLiquidityLpAmount) < 0) {
+            throw new AmmException("removeLpAmount: " + removeLpAmount + " is less than min_remove_liquidity_lp_amount: " + minRemoveLiquidityLpAmount);
+        }
+
+        // Build transaction to split coins and remove liquidity
+        ProgrammableTransaction programmableTx = new ProgrammableTransaction();
+        int index = this.splitCoin(programmableTx, address, lpType[2], removeLpAmount);
+        BigInteger balX = pool.getBalX();
+        BigInteger balY = pool.getBalY();
+        BigInteger lpSupply = pool.getLpSupply();
+        BigInteger coinXOut = MathUtil.mulDiv(balX, removeLpAmount, lpSupply);
+        BigInteger coinYOut = MathUtil.mulDiv(balY, removeLpAmount, lpSupply);
+        BigInteger coinXMin = MathUtil.getSlippageAmount(coinXOut, slippage);
+        BigInteger coinYMin = MathUtil.getSlippageAmount(coinYOut, slippage);
+
+        // Type tags
+        List<TypeTag> typeTags = new ArrayList<>(2);
+        typeTags.add(TypeTagSerializer.parseFromStr(typeX, true));
+        typeTags.add(TypeTagSerializer.parseFromStr(typeY, true));
+
+        ProgrammableMoveCall moveCall = new ProgrammableMoveCall(
+                ammConfig.packageId(),
+                MODULE,
+                SwapConstant.REMOVE_LIQUIDITY,
+                typeTags,
+                Arrays.asList(
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(this.ammConfig.globalId(), false))),
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(poolId, true))),
+                        new Argument.NestedResult(index, 0),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(removeLpAmount.longValue(), PureBcs.BasePureType.U64))),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(coinXMin.longValue(), PureBcs.BasePureType.U64))),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(coinYMin.longValue(), PureBcs.BasePureType.U64)))
+                )
+        );
+
+        // Command
+        Command depositMoveCallCommand = new Command.MoveCall(moveCall);
+        List<Command> commands = new ArrayList<>(List.of(
+                depositMoveCallCommand
+        ));
+        programmableTx.addCommands(commands);
+        return programmableTx;
+    }
+
+    /**
      * Build swap X to exact Y transaction
      * @param params Swap parameters including amountOut and optional slippage
      * @param address The address of the wallet
-     * @returns ProgrammableTransaction object
+     * @returns ProgrammableTransaction
      */
     public ProgrammableTransaction buildSwapXToExactY(SwapParams params, String address) {
         // Validate input parameters
@@ -244,9 +316,37 @@ public class AmmClient {
 
     // ------------------------- write API -------------------------
 
+
+    /**
+     * Add liquidity to a pool
+     * @param params Parameters for adding liquidity
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
+     */
     public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
         String address = suiKeyPair.address();
         ProgrammableTransaction programmableTx = buildAddLiquidity(params, address);
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
+        }
+    }
+
+
+    /**
+     * Remove liquidity from a pool
+     * @param params Parameters for removing liquidity
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
+     */
+    public SuiTransactionBlockResponse removeLiquidity(RemoveLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+        ProgrammableTransaction programmableTx = buildRemoveLiquidity(params, address);
         try {
             return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
         } catch (IOException e) {
@@ -260,7 +360,7 @@ public class AmmClient {
      * @param suiKeyPair The keypair for signing the transaction
      * @param gasPrice gas price
      * @param gasBudget gas limit
-     * @returns {Promise<TxResponse>} Transaction response containing status and txId
+     * @returns SuiTransactionBlockResponse
      */
     public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
         String address = suiKeyPair.address();
@@ -277,7 +377,7 @@ public class AmmClient {
      * @param programmableTx
      * @param type The coin type (format: packageId::module::struct)
      * @param amount The amount to split
-     * @returns ProgrammableTransaction
+     * @returns ProgrammableTransaction index
      */
     public int splitCoin(ProgrammableTransaction programmableTx, String owner, String type, BigInteger amount) {
         // Query available coins of specified type
@@ -335,7 +435,7 @@ public class AmmClient {
      * Split a specified amount of coins from the owner's balance
      * @param programmableTx
      * @param amount The amount to split
-     * @returns ProgrammableTransaction
+     * @returns ProgrammableTransaction index
      */
     public int splitSui(ProgrammableTransaction programmableTx, BigInteger amount) {
         programmableTx.addCommand(
@@ -394,7 +494,7 @@ public class AmmClient {
      * @param suiClient
      * @param typeX First token type
      * @param typeY Second token type
-     * @returns {Promise<string>} Pool ID if found
+     * @returns String Pool ID if found
      */
     public String getPoolId(SuiClient suiClient, String typeX, String typeY) {
         String lpName = PackageUtil.getLpName(typeX, typeY);

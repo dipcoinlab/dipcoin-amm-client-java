@@ -77,6 +77,34 @@ public class PackageUtil {
     }
 
     /**
+     * Generates LP token type string based on coin types
+     * This method generates a complete type identifier for LP tokens. It orders the coin types
+     * based on their BCS serialized byte array comparison to ensure consistent LP type identifiers.
+     *
+     * @param packageId Contract ID
+     * @param typeX First coin type
+     * @param typeY Second coin type
+     * @returns Tuple containing [sortedTypeX, sortedTypeY, lpType] where lpType follows format:
+     *          `${packageId}::manage::LP<${coinType1}, ${coinType2}>`
+     *
+     * @example
+     * getLPType(
+     *   "0x123",
+     *   "0x456::coin::USDC",
+     *   "0x789::coin::BTC"
+     * )
+     * Returns: ["0x456::coin::USDC", "0x789::coin::BTC", "0x123::manage::LP<0x456::coin::USDC, 0x789::coin::BTC>"]
+     */
+    public static String[] getLpType(String packageId, String typeX, String typeY) {
+        // Sort coin types to ensure consistent ordering
+        String[] orderType = orderType(typeX, typeY);
+        String coinType1 = orderType[0];
+        String coinType2 = orderType[1];
+        String lpType = packageId + "::manage::LP<" + coinType1 + ", " + coinType2 + ">";
+        return new String[]{coinType1, coinType2, lpType};
+    }
+
+    /**
      * Check if two token types are in sorted order using BCS serialization
      * @param typeX First token type
      * @param typeY Second token type
