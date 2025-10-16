@@ -14,6 +14,7 @@
 package io.dipcoin.sui.amm;
 
 import io.dipcoin.sui.amm.client.AmmClient;
+import io.dipcoin.sui.amm.config.IntervalExtension;
 import io.dipcoin.sui.amm.constant.AmmNetwork;
 import io.dipcoin.sui.amm.model.request.AddLiquidityParams;
 import io.dipcoin.sui.amm.model.request.RemoveLiquidityParams;
@@ -25,7 +26,9 @@ import io.dipcoin.sui.protocol.SuiService;
 import io.dipcoin.sui.protocol.http.HttpService;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -36,6 +39,7 @@ import java.math.BigInteger;
  * @Description :
  */
 @Slf4j
+@ExtendWith(IntervalExtension.class)
 public class AmmClientTest {
 
     public static final String TEST_URL = "https://fullnode.testnet.sui.io:443";
@@ -64,6 +68,7 @@ public class AmmClientTest {
     // --------------------- write API ---------------------
 
     @Test
+    @Tag("suite")
     void testAddLiquidity() throws IOException {
         AddLiquidityParams params = new AddLiquidityParams();
         params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
@@ -75,10 +80,12 @@ public class AmmClientTest {
         params.setSlippage(BigInteger.valueOf(100L));
 
         SuiTransactionBlockResponse response = ammClient.addLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/8XKvP3zqdEfo5CAaDwcpCkehkzoZ1mc8yGjnZLdJWV2U
         log.info("Response: {}", response);
     }
 
     @Test
+    @Tag("suite")
     void testAddLiquidityFlip() throws IOException {
         AddLiquidityParams params = new AddLiquidityParams();
         params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
@@ -90,10 +97,12 @@ public class AmmClientTest {
         params.setSlippage(BigInteger.valueOf(100L));
 
         SuiTransactionBlockResponse response = ammClient.addLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/4foJEuozTbtezmYgpBo6YEUmNHidRhWJFRqdAdJspj43
         log.info("Response: {}", response);
     }
 
     @Test
+    @Tag("suite")
     void testRemoveLiquidity() throws IOException {
         RemoveLiquidityParams params = new RemoveLiquidityParams();
         params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
@@ -104,10 +113,44 @@ public class AmmClientTest {
         params.setSlippage(BigInteger.valueOf(100L));
 
         SuiTransactionBlockResponse response = ammClient.removeLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/81bDEnXXVJZBGiH1wBKHqYxDmeb7rGqzdjXwDKbxyNVr
         log.info("Response: {}", response);
     }
 
     @Test
+    @Tag("suite")
+    void testSwapExactXToY() throws IOException {
+        SwapParams params = new SwapParams();
+        params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
+        params.setTypeY("0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI");
+        params.setTypeX("0x5c68f3d2ebfd711454da300d6abf3c7254dc9333cd138cdc68e158ebffd24483::coins::USDC");
+        params.setAmountIn(BigInteger.valueOf(1500000L));
+        // slippage tolerance 1%
+        params.setSlippage(BigInteger.valueOf(100L));
+
+        SuiTransactionBlockResponse response = ammClient.swapExactXToY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/ssBddYuiuNuTsGT94oy39pPiyYkrNJvuwbrQAXYmhwx
+        log.info("Response: {}", response);
+    }
+
+    @Test
+    @Tag("suite")
+    void testSwapExactXToYFlip() throws IOException {
+        SwapParams params = new SwapParams();
+        params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
+        params.setTypeX("0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI");
+        params.setTypeY("0x5c68f3d2ebfd711454da300d6abf3c7254dc9333cd138cdc68e158ebffd24483::coins::USDC");
+        params.setAmountIn(BigInteger.valueOf(1500000L));
+        // slippage tolerance 1%
+        params.setSlippage(BigInteger.valueOf(100L));
+
+        SuiTransactionBlockResponse response = ammClient.swapExactXToY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/5EtqpJgz7QYyiZwTotiPbfuMqpAvqNqgWFFUsmJVAXAV
+        log.info("Response: {}", response);
+    }
+
+    @Test
+    @Tag("suite")
     void testSwapXToExactY() throws IOException {
         SwapParams params = new SwapParams();
         params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
@@ -118,10 +161,12 @@ public class AmmClientTest {
         params.setSlippage(BigInteger.valueOf(100L));
 
         SuiTransactionBlockResponse response = ammClient.swapXToExactY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/CnAtv9CNe8khoaQrxHdishREc6ZX7sMosA3zsVnwPbBT
         log.info("Response: {}", response);
     }
 
     @Test
+    @Tag("suite")
     void testSwapXToExactYFlip() throws IOException {
         SwapParams params = new SwapParams();
         params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
@@ -132,6 +177,7 @@ public class AmmClientTest {
         params.setSlippage(BigInteger.valueOf(100L));
 
         SuiTransactionBlockResponse response = ammClient.swapXToExactY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/5txqLSyVXgwwfZrVoQVjMe5ocwzP5GBLebfWmFGZTd9C
         log.info("Response: {}", response);
     }
 

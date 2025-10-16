@@ -31,6 +31,41 @@ public class MathUtil {
     private final static BigInteger THOUSAND = new BigInteger("1000");
 
     /**
+     * Calculate output amount for a swap given input amount and reserves
+     * @param feeRate Fee rate to apply to swap
+     * @param amountIn Input token amount
+     * @param reserveIn Reserve of input token
+     * @param reserveOut Reserve of output token
+     * @returns Expected output amount after fees
+     */
+    public static BigInteger getAmountOut(BigInteger feeRate, BigInteger amountIn, BigInteger reserveIn, BigInteger reserveOut) {
+        // Special case: if fee_rate = 0, amount_out = y*amount_in/(x + amount_in)
+        validateFeeRate(feeRate);
+        if (amountIn.compareTo(BigInteger.ZERO) <= 0) {
+            throw new AmmException("Zero amount");
+        }
+        if (reserveIn.compareTo(BigInteger.ZERO) <= 0 || reserveOut.compareTo(BigInteger.ZERO) <= 0) {
+            throw new AmmException("Reserves empty");
+        }
+
+        // Calculate output required considering fees
+        BigInteger feeMultiplier = FEE_SCALE.subtract(feeRate);
+        BigInteger coinInValAfterFees = amountIn.multiply(feeMultiplier);
+        BigInteger newReserveIn = reserveIn.multiply(FEE_SCALE).add(coinInValAfterFees);
+
+        // Check if the denominator is zero
+        validateZero(newReserveIn);
+
+        BigInteger numerator = coinInValAfterFees.multiply(reserveOut);
+        BigInteger amountOut = numerator.divide(newReserveIn);
+
+        if (amountOut.compareTo(U64_MAX) >= 0) {
+            throw new AmmException("U64 overflow");
+        }
+        return amountOut;
+    }
+
+    /**
      * Calculate required input amount for desired output amount
      * @param feeRate Fee rate to apply to swap
      * @param amountOut Desired output token amount
@@ -39,9 +74,7 @@ public class MathUtil {
      * @returns Required input amount including fees
      */
     public static BigInteger getAmountIn(BigInteger feeRate, BigInteger amountOut, BigInteger reserveIn, BigInteger reserveOut) {
-        if (feeRate.compareTo(MAX_FEE_RATE) >= 0 || feeRate.compareTo(BigInteger.ZERO) < 0) {
-            throw new AmmException("Invalid fee rate");
-        }
+        validateFeeRate(feeRate);
         if (amountOut.compareTo(BigInteger.ZERO) <= 0) {
             throw new AmmException("Zero amount");
         }
@@ -53,10 +86,9 @@ public class MathUtil {
         BigInteger feeMultiplier = FEE_SCALE.subtract(feeRate);
         BigInteger numerator = reserveIn.multiply(amountOut).multiply(FEE_SCALE);
         BigInteger denominator = reserveOut.subtract(amountOut).multiply(feeMultiplier);
+
         // Check if the denominator is zero
-        if (denominator.equals(BigInteger.ZERO)) {
-            throw new AmmException("Division by zero");
-        }
+        validateZero(denominator);
 
         BigInteger amountIn = numerator.divide(denominator).add(BigInteger.ONE);
         if (amountIn.compareTo(U64_MAX) >= 0) {
@@ -158,6 +190,16 @@ public class MathUtil {
      */
     public static BigInteger getSlippageAmount(BigInteger amount, BigInteger slippage) {
         return amount.multiply(SwapConstant.SLIPPAGE_SCALE.subtract(slippage)).divide(SwapConstant.SLIPPAGE_SCALE);
+    }
+
+    /**
+     * validate fee rate
+     * @param amount
+     */
+    public static void validateFeeRate(BigInteger amount) {
+        if (amount.compareTo(MAX_FEE_RATE) >= 0 || amount.compareTo(BigInteger.ZERO) < 0) {
+            throw new AmmException("Invalid fee rate");
+        }
     }
 
     /**

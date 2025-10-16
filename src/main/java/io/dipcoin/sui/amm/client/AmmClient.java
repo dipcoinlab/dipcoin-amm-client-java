@@ -90,15 +90,20 @@ public class AmmClient {
         this.suiClient = suiClient;
     }
 
-    // ------------------------- build API -------------------------
+    // ------------------------- write API -------------------------
+
 
     /**
-     * Build add liquidity transaction
+     * Add liquidity to a pool
      * @param params Parameters for adding liquidity
-     * @param address The address of the wallet
-     * @returns ProgrammableTransaction
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
      */
-    public ProgrammableTransaction buildAddLiquidity(AddLiquidityParams params, String address) {
+    public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+
         // Validate input parameters
         MathUtil.validateAmount(params.getAmountX());
         MathUtil.validateAmount(params.getAmountY());
@@ -135,15 +140,18 @@ public class AmmClient {
         // Build transaction to split coins and add liquidity
         ProgrammableTransaction programmableTx = new ProgrammableTransaction();
 
+        AtomicReference<BigInteger> suiUse = new AtomicReference<>(BigInteger.ZERO);
         int splitIndexX = 0;
         if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
             splitIndexX = this.splitSui(programmableTx, amountX);
+            suiUse.set(amountX);
         } else {
             splitIndexX = this.splitCoin(programmableTx, address, typeX, amountX);
         }
         int splitIndexY = 0;
         if (typeY.equals(SwapConstant.COIN_TYPE_SUI)) {
             splitIndexY = this.splitSui(programmableTx, amountY);
+            suiUse.set(amountY);
         } else {
             splitIndexY = this.splitCoin(programmableTx, address, typeY, amountY);
         }
@@ -176,16 +184,26 @@ public class AmmClient {
                 depositMoveCallCommand
         ));
         programmableTx.addCommands(commands);
-        return programmableTx;
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
+        }
     }
 
+
     /**
-     * Build remove liquidity transaction
+     * Remove liquidity from a pool
      * @param params Parameters for removing liquidity
-     * @param address The address of the wallet
-     * @returns ProgrammableTransaction
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
      */
-    public ProgrammableTransaction buildRemoveLiquidity(RemoveLiquidityParams params, String address) {
+    public SuiTransactionBlockResponse removeLiquidity(RemoveLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+
         // Validate input parameters
         BigInteger removeLpAmount = params.getRemoveLpAmount();
         MathUtil.validateAmount(removeLpAmount);
@@ -247,16 +265,101 @@ public class AmmClient {
                 depositMoveCallCommand
         ));
         programmableTx.addCommands(commands);
-        return programmableTx;
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
+        }
     }
 
     /**
-     * Build swap X to exact Y transaction
-     * @param params Swap parameters including amountOut and optional slippage
-     * @param address The address of the wallet
-     * @returns ProgrammableTransaction
+     * Swap an exact amount of token X for token Y
+     * @param params Swap parameters including amountIn and optional slippage
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
      */
-    public ProgrammableTransaction buildSwapXToExactY(SwapParams params, String address) {
+    public SuiTransactionBlockResponse swapExactXToY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+
+        // Validate input parameters
+        BigInteger amountIn = params.getAmountIn();
+        MathUtil.validateAmount(amountIn);
+        BigInteger slippage = params.getSlippage();
+        MathUtil.validateSlippage(slippage);
+
+        // Fetch current pool and global state
+        String poolId = params.getPoolId();
+        Pool pool = this.getPool(suiClient, params.getPoolId());
+
+        // Sort token types and determine swap direction
+        String typeX = params.getTypeX();
+        String[] orderType = PackageUtil.orderType(typeX, params.getTypeY());
+        boolean isSwap = !orderType[0].equals(typeX);
+        BigInteger balanceX = isSwap ? pool.getBalY() : pool.getBalX();
+        BigInteger balanceY = isSwap ? pool.getBalX() : pool.getBalY();
+        BigInteger amountOut = MathUtil.getAmountOut(pool.getFeeRate(), amountIn, balanceX, balanceY);
+
+        BigInteger amountOutMin = MathUtil.getSlippageAmount(amountOut, slippage);
+        String functionName = isSwap ? SwapConstant.SWAP_EXACT_Y_TO_X : SwapConstant.SWAP_EXACT_X_TO_Y;
+
+        ProgrammableTransaction programmableTx = new ProgrammableTransaction();
+
+        int splitIndex = 0;
+        AtomicReference<BigInteger> suiUse = new AtomicReference<>(BigInteger.ZERO);
+        if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
+            splitIndex = this.splitSui(programmableTx, amountIn);
+            suiUse.set(amountIn);
+        } else {
+            splitIndex = this.splitCoin(programmableTx, address, typeX, amountIn);
+        }
+
+        // Type tags
+        List<TypeTag> typeTags = new ArrayList<>(2);
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[0], true));
+        typeTags.add(TypeTagSerializer.parseFromStr(orderType[1], true));
+
+        ProgrammableMoveCall moveCall = new ProgrammableMoveCall(
+                ammConfig.packageId(),
+                MODULE,
+                functionName,
+                typeTags,
+                Arrays.asList(
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(this.ammConfig.globalId(), false))),
+                        Argument.ofInput(programmableTx.addInput(this.getSharedObject(poolId, true))),
+                        new Argument.NestedResult(splitIndex, 0),
+                        Argument.ofInput(programmableTx.addInput(
+                                new CallArgPure(amountOutMin.longValue(), PureBcs.BasePureType.U64)))
+                )
+        );
+
+        // Command
+        Command depositMoveCallCommand = new Command.MoveCall(moveCall);
+        List<Command> commands = new ArrayList<>(List.of(
+                depositMoveCallCommand
+        ));
+        programmableTx.addCommands(commands);
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
+        } catch (IOException e) {
+            throw new AmmException(e.getMessage());
+        }
+    }
+
+    /**
+     * Swap token X for an exact amount of token Y
+     * @param params Swap parameters including amountOut and optional slippage
+     * @param suiKeyPair The keypair for signing the transaction
+     * @param gasPrice gas price
+     * @param gasBudget gas limit
+     * @returns SuiTransactionBlockResponse
+     */
+    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
+        String address = suiKeyPair.address();
+
         // Validate input parameters
         MathUtil.validateAmount(params.getAmountOut());
         BigInteger slippage = params.getSlippage();
@@ -280,8 +383,10 @@ public class AmmClient {
         ProgrammableTransaction programmableTx = new ProgrammableTransaction();
 
         int splitIndex = 0;
+        AtomicReference<BigInteger> suiUse = new AtomicReference<>(BigInteger.ZERO);
         if (typeX.equals(SwapConstant.COIN_TYPE_SUI)) {
             splitIndex = this.splitSui(programmableTx, amountInMax);
+            suiUse.set(amountInMax);
         } else {
             splitIndex = this.splitCoin(programmableTx, address, typeX, amountInMax);
         }
@@ -311,62 +416,9 @@ public class AmmClient {
                 depositMoveCallCommand
         ));
         programmableTx.addCommands(commands);
-        return programmableTx;
-    }
 
-    // ------------------------- write API -------------------------
-
-
-    /**
-     * Add liquidity to a pool
-     * @param params Parameters for adding liquidity
-     * @param suiKeyPair The keypair for signing the transaction
-     * @param gasPrice gas price
-     * @param gasBudget gas limit
-     * @returns SuiTransactionBlockResponse
-     */
-    public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-        ProgrammableTransaction programmableTx = buildAddLiquidity(params, address);
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
-        } catch (IOException e) {
-            throw new AmmException(e.getMessage());
-        }
-    }
-
-
-    /**
-     * Remove liquidity from a pool
-     * @param params Parameters for removing liquidity
-     * @param suiKeyPair The keypair for signing the transaction
-     * @param gasPrice gas price
-     * @param gasBudget gas limit
-     * @returns SuiTransactionBlockResponse
-     */
-    public SuiTransactionBlockResponse removeLiquidity(RemoveLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-        ProgrammableTransaction programmableTx = buildRemoveLiquidity(params, address);
-        try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
-        } catch (IOException e) {
-            throw new AmmException(e.getMessage());
-        }
-    }
-
-    /**
-     * Swap token X for an exact amount of token Y
-     * @param params Swap parameters including amountOut and optional slippage
-     * @param suiKeyPair The keypair for signing the transaction
-     * @param gasPrice gas price
-     * @param gasBudget gas limit
-     * @returns SuiTransactionBlockResponse
-     */
-    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-        ProgrammableTransaction programmableTx = buildSwapXToExactY(params, address);
-        try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
         } catch (IOException e) {
             throw new AmmException(e.getMessage());
         }
