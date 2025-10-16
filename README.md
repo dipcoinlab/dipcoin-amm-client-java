@@ -377,8 +377,8 @@ public class Global {
 
 ### Default Values
 
-- Default slippage tolerance: 5% (0.05)
-- Maximum fee rate: 1% (0.01)
+- Default slippage tolerance: 5% `new BigInteger("500")`
+- Maximum fee rate: 1% (BigInteger.ONE)
 
 ## License
 
