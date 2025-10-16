@@ -4,6 +4,34 @@ Java Implementation of the dipcoin AMM Swap Client Library
 
 ## Quick Start
 
+
+### 📦 Maven Dependency
+
+```xml
+<dependency>
+    <groupId>io.dipcoin</groupId>
+    <artifactId>sui-amm-client-java</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+</dependency>
+```
+
+It already meets basic on-chain requirements, but it is still in the refinement stage with frequent additions and modifications. Therefore, only the SNAPSHOT version has been published, requiring the addition of a repository in `pom.xml` or `settings.xml`.
+
+```xml
+<repositories>
+    <repository>
+        <id>sonatype-snapshots</id>
+        <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        <releases>
+            <enabled>false</enabled>
+        </releases>
+        <snapshots>
+            <enabled>true</enabled>
+        </snapshots>
+    </repository>
+</repositories>
+```
+
 ### Initialize SDK
 
 ```java
