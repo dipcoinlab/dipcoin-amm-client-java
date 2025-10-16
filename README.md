@@ -5,7 +5,7 @@ Java Implementation of the dipcoin AMM Swap Client Library
 ## Quick Start
 
 
-### 📦 Maven Dependency
+### Maven Dependency
 
 ```xml
 <dependency>
@@ -30,6 +30,24 @@ It already meets basic on-chain requirements, but it is still in the refinement 
         </snapshots>
     </repository>
 </repositories>
+```
+
+### Gradle Dependency
+
+```gradle
+implementation 'io.dipcoin:sui-amm-client-java:1.0.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+
+    // Sonatype snapshots
+    maven {
+        url "https://central.sonatype.com/repository/maven-snapshots/"
+        mavenContent {
+            snapshotsOnly()
+        }
+    }
+}
 ```
 
 ### Initialize SDK
