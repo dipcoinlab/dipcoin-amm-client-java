@@ -20,6 +20,7 @@ import io.dipcoin.sui.amm.model.request.AddLiquidityParams;
 import io.dipcoin.sui.amm.model.request.RemoveLiquidityParams;
 import io.dipcoin.sui.amm.model.request.SwapParams;
 import io.dipcoin.sui.amm.wallet.WalletKey;
+import io.dipcoin.sui.crypto.Ed25519KeyPair;
 import io.dipcoin.sui.model.transaction.SuiTransactionBlockResponse;
 import io.dipcoin.sui.protocol.SuiClient;
 import io.dipcoin.sui.protocol.SuiService;
@@ -79,6 +80,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.addLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/8XKvP3zqdEfo5CAaDwcpCkehkzoZ1mc8yGjnZLdJWV2U
         log.info("Response: {}", response);
@@ -96,6 +99,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.addLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/4foJEuozTbtezmYgpBo6YEUmNHidRhWJFRqdAdJspj43
         log.info("Response: {}", response);
@@ -112,6 +117,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.removeLiquidity(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/81bDEnXXVJZBGiH1wBKHqYxDmeb7rGqzdjXwDKbxyNVr
         log.info("Response: {}", response);
@@ -128,6 +135,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.swapExactXToY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/ssBddYuiuNuTsGT94oy39pPiyYkrNJvuwbrQAXYmhwx
         log.info("Response: {}", response);
@@ -144,6 +153,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.swapExactXToY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/5EtqpJgz7QYyiZwTotiPbfuMqpAvqNqgWFFUsmJVAXAV
         log.info("Response: {}", response);
@@ -160,6 +171,8 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.swapXToExactY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/CnAtv9CNe8khoaQrxHdishREc6ZX7sMosA3zsVnwPbBT
         log.info("Response: {}", response);
@@ -176,9 +189,31 @@ public class AmmClientTest {
         // slippage tolerance 1%
         params.setSlippage(BigInteger.valueOf(100L));
 
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
         SuiTransactionBlockResponse response = ammClient.swapXToExactY(params, WalletKey.suiKeyPair, 1000L, BigInteger.TEN.pow(8));
         // https://testnet.suivision.xyz/txblock/5txqLSyVXgwwfZrVoQVjMe5ocwzP5GBLebfWmFGZTd9C
         log.info("Response: {}", response);
+    }
+
+    public static void main(String[] args) {
+        HttpService suiService = new HttpService("https://fullnode.testnet.sui.io:443");
+        SuiClient suiClient = SuiClient.build(suiService);
+        AmmClient ammClient = new AmmClient(AmmNetwork.TESTNET, suiClient);
+
+        SwapParams params = new SwapParams();
+        params.setPoolId("0xf2cddb6036ffc128430fefab738a34d0ecb147ac28f25c64cfd9039a945e904e");
+        params.setTypeX("0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI");
+        params.setTypeY("0x5c68f3d2ebfd711454da300d6abf3c7254dc9333cd138cdc68e158ebffd24483::coins::USDC");
+        params.setAmountIn(BigInteger.valueOf(1500000L));
+        // slippage tolerance 1%
+        params.setSlippage(BigInteger.valueOf(100L));
+
+        // gas price 1000 (For dynamic queries, please refer to the `getReferenceGasPrice()` method in `SuiClient`)
+        // gas limit 0.1 SUI (BigInteger.TEN.pow(8))1000
+        SuiTransactionBlockResponse response = ammClient.swapExactXToY(params, Ed25519KeyPair.decodeHex("xxx"), 1000L, BigInteger.TEN.pow(8));
+        // https://testnet.suivision.xyz/txblock/5EtqpJgz7QYyiZwTotiPbfuMqpAvqNqgWFFUsmJVAXAV
+        System.out.println("Response: " + response);
     }
 
 }

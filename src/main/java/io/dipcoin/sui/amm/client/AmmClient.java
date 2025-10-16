@@ -112,7 +112,7 @@ public class AmmClient {
 
         // Fetch current pool and global state
         String poolId = params.getPoolId();
-        Pool pool = this.getPool(suiClient, poolId);
+        Pool pool = this.getPool(poolId);
 
         // Sort token types and determine swap direction
         String[] orderType = PackageUtil.orderType(params.getTypeX(), params.getTypeY());
@@ -218,7 +218,7 @@ public class AmmClient {
 
         // Fetch current pool and global state
         String poolId = params.getPoolId();
-        Pool pool = this.getPool(suiClient, poolId);
+        Pool pool = this.getPool(poolId);
 
         BigInteger minRemoveLiquidityLpAmount = pool.getMinAddLiquidityLpAmount().divide(BigInteger.TEN);
         if (removeLpAmount.compareTo(minRemoveLiquidityLpAmount) < 0) {
@@ -292,7 +292,7 @@ public class AmmClient {
 
         // Fetch current pool and global state
         String poolId = params.getPoolId();
-        Pool pool = this.getPool(suiClient, params.getPoolId());
+        Pool pool = this.getPool(params.getPoolId());
 
         // Sort token types and determine swap direction
         String typeX = params.getTypeX();
@@ -367,7 +367,7 @@ public class AmmClient {
 
         // Fetch current pool and global state
         String poolId = params.getPoolId();
-        Pool pool = this.getPool(suiClient, params.getPoolId());
+        Pool pool = this.getPool(params.getPoolId());
 
         // Sort token types and determine swap direction
         String typeX = params.getTypeX();
@@ -504,7 +504,7 @@ public class AmmClient {
      * @param poolId The ID of the pool to query
      * @returns Pool information response
      */
-    public Pool getPool(SuiClient suiClient, String poolId) {
+    public Pool getPool(String poolId) {
         ObjectData objectData = QueryBuilder.getObjectData(suiClient, poolId, ObjectDataOptions.contentAndTypeTrue());
         MoveObject content = (MoveObject) objectData.getContent();
         MoveStructMap fields = (MoveStructMap) content.getFields();
@@ -529,7 +529,7 @@ public class AmmClient {
      * Get global configuration information
      * @returns Global configuration response
      */
-    public Global getGlobal(SuiClient suiClient) {
+    public Global getGlobal() {
         ObjectData objectData = QueryBuilder.getObjectData(suiClient, ammConfig.globalId(), ObjectDataOptions.contentAndTypeTrue());
         MoveObject content = (MoveObject) objectData.getContent();
         MoveStructMap fields = (MoveStructMap) content.getFields();
@@ -543,12 +543,11 @@ public class AmmClient {
 
     /**
      * Get pool ID for a given token pair
-     * @param suiClient
      * @param typeX First token type
      * @param typeY Second token type
      * @returns String Pool ID if found
      */
-    public String getPoolId(SuiClient suiClient, String typeX, String typeY) {
+    public String getPoolId(String typeX, String typeY) {
         String lpName = PackageUtil.getLpName(typeX, typeY);
         GetDynamicFieldObject data = new GetDynamicFieldObject();
         data.setParentObjectId(this.ammConfig.registeredPoolsId());
