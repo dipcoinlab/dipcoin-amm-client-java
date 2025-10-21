@@ -6,8 +6,8 @@
 
     <groupId>io.dipcoin</groupId>
     <artifactId>sui-amm-client-java</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
     <name>sui-amm-client-java</name>
+    <version>1.0.0</version>
     <description>Java Implementation of the Dipcoin AMM Swap Client Library.</description>
     <url>https://github.com/dipcoinlab/dipcoinlab/dipcoin-amm-client-java</url>
 
