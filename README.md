@@ -11,14 +11,14 @@ Java Implementation of the dipcoin AMM Swap Client Library
 <dependency>
     <groupId>io.dipcoin</groupId>
     <artifactId>sui-amm-client-java</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
 ### Gradle Dependency
 
 ```gradle
-implementation 'io.dipcoin:sui-amm-client-java:1.0.1'
+implementation 'io.dipcoin:sui-amm-client-java:1.0.0'
 ```
 
 ### Initialize SDK
