@@ -11,14 +11,14 @@ Java Implementation of the dipcoin AMM Swap Client Library
 <dependency>
     <groupId>io.dipcoin</groupId>
     <artifactId>sui-amm-client-java</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
 </dependency>
 ```
 
 ### Gradle Dependency
 
 ```gradle
-implementation 'io.dipcoin:sui-amm-client-java:1.0.1'
+implementation 'io.dipcoin:sui-amm-client-java:1.0.2'
 ```
 
 ### Initialize SDK
@@ -34,12 +34,45 @@ public class Test{
         // Initialize for mainnet
         HttpService suiService = new HttpService("https://fullnode.mainnet.sui.io:443"); // Optional custom RPC
         SuiClient suiClient = SuiClient.build(suiService);
-        AmmClient ammClient = new AmmClient(AmmNetwork.MAINNET,suiClient);
+        AmmClient ammClient = new AmmClient(AmmNetwork.MAINNET, suiClient);
 
         // Initialize for testnet
         HttpService suiService = new HttpService("https://fullnode.testnet.sui.io:443"); // Optional custom RPC
         SuiClient suiClient = SuiClient.build(suiService);
         AmmClient ammClient = new AmmClient(AmmNetwork.TESTNET, suiClient);
+    }
+}
+```
+
+### AmmOffSignClient
+
+**Purpose**: Handles on-chain operations with external wallet integration. Designed for scenarios where private keys are managed by external wallet systems (hardware wallets, wallet SDKs, custody solutions). Requires implementing the `WalletService` interface.
+
+#### WalletService Interface
+
+You must implement this interface to integrate with your wallet system:
+
+```java
+import io.dipcoin.sui.amm.client.chain.WalletService;
+
+public class MyWalletService implements WalletService {
+    
+    @Override
+    public String sign(String address, byte[] txData) {
+        // Implement your wallet signing logic here
+        // txData is the BCS-encoded transaction bytes
+        // Return the signature string
+        
+        // Example with hardware wallet:
+        // HardwareWallet wallet = getWalletForAddress(address);
+        // byte[] signature = wallet.signTransaction(txData);
+        // return Base64.toBase64String(signature);
+        
+        // Example with key management service:
+        // KeyManagementService kms = getKMSClient();
+        // return kms.signTransaction(address, txData);
+        
+        return yourSigningImplementation(address, txData);
     }
 }
 ```

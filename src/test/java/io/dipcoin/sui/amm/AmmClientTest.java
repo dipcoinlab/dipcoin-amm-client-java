@@ -23,7 +23,6 @@ import io.dipcoin.sui.amm.wallet.WalletKey;
 import io.dipcoin.sui.crypto.Ed25519KeyPair;
 import io.dipcoin.sui.model.transaction.SuiTransactionBlockResponse;
 import io.dipcoin.sui.protocol.SuiClient;
-import io.dipcoin.sui.protocol.SuiService;
 import io.dipcoin.sui.protocol.http.HttpService;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,13 +42,6 @@ import java.math.BigInteger;
 @ExtendWith(IntervalExtension.class)
 public class AmmClientTest {
 
-    public static final String TEST_URL = "https://fullnode.testnet.sui.io:443";
-//        public static final String TEST_URL = "https://fullnode.mainnet.sui.io:443";
-//    public static final String TEST_URL = "https://rpc-testnet.suiscan.xyz/";
-//    public static final String TEST_URL = "https://rpc-mainnet.suiscan.xyz/";
-
-    protected SuiService suiService;
-
     protected SuiClient suiClient;
 
     protected AmmClient ammClient;
@@ -61,9 +53,10 @@ public class AmmClientTest {
 
     @BeforeEach
     protected void setUp() {
-        this.suiService = new HttpService(TEST_URL);
+        AmmNetwork ammNetwork = AmmNetwork.TESTNET;
+        HttpService suiService = new HttpService(ammNetwork.getConfig().suiRpc());
         this.suiClient = SuiClient.build(suiService);
-        this.ammClient = new AmmClient(AmmNetwork.TESTNET, suiClient);
+        this.ammClient = new AmmClient(ammNetwork, suiClient);
     }
 
     // --------------------- write API ---------------------
