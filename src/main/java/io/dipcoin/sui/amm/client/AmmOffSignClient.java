@@ -31,10 +31,11 @@ import io.dipcoin.sui.bcs.types.transaction.Command;
 import io.dipcoin.sui.bcs.types.transaction.ProgrammableMoveCall;
 import io.dipcoin.sui.bcs.types.transaction.ProgrammableTransaction;
 import io.dipcoin.sui.client.TransactionBuilder;
-import io.dipcoin.sui.crypto.SuiKeyPair;
 import io.dipcoin.sui.model.transaction.SuiTransactionBlockResponse;
 import io.dipcoin.sui.protocol.SuiClient;
+import io.dipcoin.sui.protocol.exceptions.RpcRequestFailedException;
 import io.dipcoin.sui.protocol.http.HttpService;
+import org.bouncycastle.util.encoders.Base64;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -45,19 +46,23 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author : Same
- * @datetime : 2025/10/5 11:00
- * @Description : amm client
+ * @datetime : 2025/11/6 10:53
+ * @Description : self-implemented wallet signature for offline signed transactions to the on-chain client (implement WalletService)
  */
-public class AmmClient extends AbstractOnChainClient {
+public class AmmOffSignClient extends AbstractOnChainClient {
 
-    public AmmClient(AmmNetwork ammNetwork) {
+    private final AmmWalletService ammWalletService;
+
+    public AmmOffSignClient(AmmNetwork ammNetwork, AmmWalletService ammWalletService) {
         super.ammConfig = ammNetwork.getConfig();
         super.suiClient = SuiClient.build(new HttpService(ammConfig.suiRpc()));
+        this.ammWalletService = ammWalletService;
     }
 
-    public AmmClient(AmmNetwork ammNetwork, SuiClient suiClient) {
+    public AmmOffSignClient(AmmNetwork ammNetwork, SuiClient suiClient, AmmWalletService ammWalletService) {
         super.ammConfig = ammNetwork.getConfig();
         super.suiClient = suiClient;
+        this.ammWalletService = ammWalletService;
     }
 
     // ------------------------- write API -------------------------
@@ -65,14 +70,12 @@ public class AmmClient extends AbstractOnChainClient {
     /**
      * Add liquidity to a pool
      * @param params Parameters for adding liquidity
-     * @param suiKeyPair The keypair for signing the transaction
+     * @param sender The sender for signing the transaction
      * @param gasPrice gas price
      * @param gasBudget gas limit
      * @returns SuiTransactionBlockResponse
      */
-    public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-
+    public SuiTransactionBlockResponse addLiquidity(AddLiquidityParams params, String sender, long gasPrice, BigInteger gasBudget) {
         // Validate input parameters
         MathUtil.validateAmount(params.getAmountX());
         MathUtil.validateAmount(params.getAmountY());
@@ -115,14 +118,14 @@ public class AmmClient extends AbstractOnChainClient {
             splitIndexX = super.splitSui(programmableTx, amountX);
             suiUse.set(amountX);
         } else {
-            splitIndexX = super.splitCoin(programmableTx, address, typeX, amountX);
+            splitIndexX = super.splitCoin(programmableTx, sender, typeX, amountX);
         }
         int splitIndexY = 0;
         if (typeY.equals(SwapConstant.COIN_TYPE_SUI)) {
             splitIndexY = super.splitSui(programmableTx, amountY);
             suiUse.set(amountY);
         } else {
-            splitIndexY = super.splitCoin(programmableTx, address, typeY, amountY);
+            splitIndexY = super.splitCoin(programmableTx, sender, typeY, amountY);
         }
 
         // Type tags
@@ -154,10 +157,19 @@ public class AmmClient extends AbstractOnChainClient {
         ));
         programmableTx.addCommands(commands);
 
+        String txBytes;
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
+            txBytes = TransactionBuilder.serializeTransactionBytes(programmableTx, sender, TransactionBuilder.buildGasData(suiClient, sender, gasPrice, gasBudget, suiUse.get()));
         } catch (IOException e) {
-            throw new AmmException(e.getMessage());
+            throw new AmmException("unsafe moveCall addLiquidity failed!", e);
+        }
+
+        String signature = ammWalletService.sign(sender, Base64.decode(txBytes));
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, txBytes, List.of(signature));
+        } catch (IOException e) {
+            throw new RpcRequestFailedException("Failed to send addLiquidity transaction", e);
         }
     }
 
@@ -165,14 +177,12 @@ public class AmmClient extends AbstractOnChainClient {
     /**
      * Remove liquidity from a pool
      * @param params Parameters for removing liquidity
-     * @param suiKeyPair The keypair for signing the transaction
+     * @param sender The sender for signing the transaction
      * @param gasPrice gas price
      * @param gasBudget gas limit
      * @returns SuiTransactionBlockResponse
      */
-    public SuiTransactionBlockResponse removeLiquidity(RemoveLiquidityParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-
+    public SuiTransactionBlockResponse removeLiquidity(RemoveLiquidityParams params, String sender, long gasPrice, BigInteger gasBudget) {
         // Validate input parameters
         BigInteger removeLpAmount = params.getRemoveLpAmount();
         MathUtil.validateAmount(removeLpAmount);
@@ -196,7 +206,7 @@ public class AmmClient extends AbstractOnChainClient {
 
         // Build transaction to split coins and remove liquidity
         ProgrammableTransaction programmableTx = new ProgrammableTransaction();
-        int index = super.splitCoin(programmableTx, address, lpType[2], removeLpAmount);
+        int index = super.splitCoin(programmableTx, sender, lpType[2], removeLpAmount);
         BigInteger balX = pool.getBalX();
         BigInteger balY = pool.getBalY();
         BigInteger lpSupply = pool.getLpSupply();
@@ -235,24 +245,31 @@ public class AmmClient extends AbstractOnChainClient {
         ));
         programmableTx.addCommands(commands);
 
+        String txBytes;
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget));
+            txBytes = TransactionBuilder.serializeTransactionBytes(programmableTx, sender, TransactionBuilder.buildGasData(suiClient, sender, gasPrice, gasBudget));
         } catch (IOException e) {
-            throw new AmmException(e.getMessage());
+            throw new AmmException("unsafe moveCall removeLiquidity failed!", e);
+        }
+
+        String signature = ammWalletService.sign(sender, Base64.decode(txBytes));
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, txBytes, List.of(signature));
+        } catch (IOException e) {
+            throw new RpcRequestFailedException("Failed to send removeLiquidity transaction", e);
         }
     }
 
     /**
      * Swap an exact amount of token X for token Y
      * @param params Swap parameters including amountIn and optional slippage
-     * @param suiKeyPair The keypair for signing the transaction
+     * @param sender The sender for signing the transaction
      * @param gasPrice gas price
      * @param gasBudget gas limit
      * @returns SuiTransactionBlockResponse
      */
-    public SuiTransactionBlockResponse swapExactXToY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-
+    public SuiTransactionBlockResponse swapExactXToY(SwapParams params, String sender, long gasPrice, BigInteger gasBudget) {
         // Validate input parameters
         BigInteger amountIn = params.getAmountIn();
         MathUtil.validateAmount(amountIn);
@@ -282,7 +299,7 @@ public class AmmClient extends AbstractOnChainClient {
             splitIndex = super.splitSui(programmableTx, amountIn);
             suiUse.set(amountIn);
         } else {
-            splitIndex = super.splitCoin(programmableTx, address, typeX, amountIn);
+            splitIndex = super.splitCoin(programmableTx, sender, typeX, amountIn);
         }
 
         // Type tags
@@ -311,24 +328,31 @@ public class AmmClient extends AbstractOnChainClient {
         ));
         programmableTx.addCommands(commands);
 
+        String txBytes;
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
+            txBytes = TransactionBuilder.serializeTransactionBytes(programmableTx, sender, TransactionBuilder.buildGasData(suiClient, sender, gasPrice, gasBudget, suiUse.get()));
         } catch (IOException e) {
-            throw new AmmException(e.getMessage());
+            throw new AmmException("unsafe moveCall swapExactXToY failed!", e);
+        }
+
+        String signature = ammWalletService.sign(sender, Base64.decode(txBytes));
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, txBytes, List.of(signature));
+        } catch (IOException e) {
+            throw new RpcRequestFailedException("Failed to send swapExactXToY transaction", e);
         }
     }
 
     /**
      * Swap token X for an exact amount of token Y
      * @param params Swap parameters including amountOut and optional slippage
-     * @param suiKeyPair The keypair for signing the transaction
+     * @param sender The sender for signing the transaction
      * @param gasPrice gas price
      * @param gasBudget gas limit
      * @returns SuiTransactionBlockResponse
      */
-    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, SuiKeyPair suiKeyPair, long gasPrice, BigInteger gasBudget) {
-        String address = suiKeyPair.address();
-
+    public SuiTransactionBlockResponse swapXToExactY(SwapParams params, String sender, long gasPrice, BigInteger gasBudget) {
         // Validate input parameters
         MathUtil.validateAmount(params.getAmountOut());
         BigInteger slippage = params.getSlippage();
@@ -357,7 +381,7 @@ public class AmmClient extends AbstractOnChainClient {
             splitIndex = super.splitSui(programmableTx, amountInMax);
             suiUse.set(amountInMax);
         } else {
-            splitIndex = super.splitCoin(programmableTx, address, typeX, amountInMax);
+            splitIndex = super.splitCoin(programmableTx, sender, typeX, amountInMax);
         }
 
         // Type tags
@@ -386,10 +410,19 @@ public class AmmClient extends AbstractOnChainClient {
         ));
         programmableTx.addCommands(commands);
 
+        String txBytes;
         try {
-            return TransactionBuilder.sendTransaction(suiClient, programmableTx, suiKeyPair, TransactionBuilder.buildGasData(suiClient, address, gasPrice, gasBudget, suiUse.get()));
+            txBytes = TransactionBuilder.serializeTransactionBytes(programmableTx, sender, TransactionBuilder.buildGasData(suiClient, sender, gasPrice, gasBudget, suiUse.get()));
         } catch (IOException e) {
-            throw new AmmException(e.getMessage());
+            throw new AmmException("unsafe moveCall swapXToExactY failed!", e);
+        }
+
+        String signature = ammWalletService.sign(sender, Base64.decode(txBytes));
+
+        try {
+            return TransactionBuilder.sendTransaction(suiClient, txBytes, List.of(signature));
+        } catch (IOException e) {
+            throw new RpcRequestFailedException("Failed to send swapXToExactY transaction", e);
         }
     }
 
